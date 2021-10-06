@@ -8,15 +8,16 @@ module Development.IDE.Graph.Database(
     shakeRunDatabase,
     shakeRunDatabaseForKeys,
     shakeProfileDatabase,
-    ) where
+    shakeLastBuildKeys) where
 
 import           Data.Dynamic
 import           Data.Maybe
-import           Development.IDE.Graph.Classes ()
+import           Development.IDE.Graph.Classes           ()
 import           Development.IDE.Graph.Internal.Action
 import           Development.IDE.Graph.Internal.Database
 import           Development.IDE.Graph.Internal.Options
-import           Development.IDE.Graph.Internal.Profile  (writeProfile)
+import           Development.IDE.Graph.Internal.Profile  (getLastBuildKeys,
+                                                          writeProfile)
 import           Development.IDE.Graph.Internal.Rules
 import           Development.IDE.Graph.Internal.Types
 
@@ -37,6 +38,10 @@ shakeNewDatabase opts rules = do
 
 shakeRunDatabase :: ShakeDatabase -> [Action a] -> IO ([a], [IO ()])
 shakeRunDatabase = shakeRunDatabaseForKeys Nothing
+
+shakeLastBuildKeys :: ShakeDatabase -> IO [Key]
+shakeLastBuildKeys (ShakeDatabase _ _ db) = getLastBuildKeys db
+
 
 -- Only valid if we never pull on the results, which we don't
 unvoid :: Functor m => m () -> m a

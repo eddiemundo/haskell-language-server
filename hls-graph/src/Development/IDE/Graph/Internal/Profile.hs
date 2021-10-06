@@ -1,10 +1,11 @@
 {-# LANGUAGE CPP             #-}
+{-# LANGUAGE DeriveFunctor   #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ViewPatterns    #-}
 
 {- HLINT ignore "Redundant bracket" -} -- a result of CPP expansion
 
-module Development.IDE.Graph.Internal.Profile (writeProfile) where
+module Development.IDE.Graph.Internal.Profile (writeProfile,getProfile,getLastBuildKeys) where
 
 import           Data.Bifunctor
 import qualified Data.ByteString.Lazy.Char8           as LBS
@@ -41,17 +42,28 @@ import           Data.FileEmbed
 import           Language.Haskell.TH.Syntax           (runIO)
 #endif
 
--- | Generates an report given some build system profiling data.
-writeProfile :: FilePath -> Database -> IO ()
-writeProfile out db = do
+getLastBuildKeys :: Database -> IO [Key]
+getLastBuildKeys db = do
+    (rpt, _) <- getProfile db
+    return [ prfName p | p <- rpt, prfBuilt p == 0]
+
+getProfile :: Database -> IO ([ProfileEntry Key], Maybe [Int])
+getProfile db = do
     dirtyKeys <- readIORef (databaseDirtySet db)
     (report, mapping) <- toReport db
     let dirtyKeysMapped = mapMaybe (`IntMap.lookup` mapping) . Set.toList <$> dirtyKeys
-    rpt <- generateHTML (sort <$> dirtyKeysMapped) report
+    return (report, dirtyKeysMapped)
+
+-- | Generates an report given some build system profiling data.
+writeProfile :: FilePath -> Database -> IO ()
+writeProfile out db = do
+    (report, dirtyKeysMapped) <- getProfile db
+    rpt <- generateHTML (sort <$> dirtyKeysMapped) ((fmap.fmap) show report)
     LBS.writeFile out rpt
 
-data ProfileEntry = ProfileEntry
-    {prfName :: !String, prfBuilt :: !Int, prfChanged :: !Int, prfVisited :: !Int, prfDepends :: [[Int]], prfExecution :: !Seconds}
+data ProfileEntry a = ProfileEntry
+    {prfName :: !a, prfBuilt :: !Int, prfChanged :: !Int, prfVisited :: !Int, prfDepends :: [[Int]], prfExecution :: !Seconds}
+    deriving Functor
 
 -- | Eliminate all errors from the database, pretending they don't exist
 -- resultsOnly :: Map.HashMap Id (Key, Status) -> Map.HashMap Id (Key, Result (Either BS.ByteString Value))
@@ -104,7 +116,7 @@ prepareForDependencyOrder db = do
         <$> Ids.toList (databaseValues db)
 
 -- | Returns a list of profile entries, and a mapping linking a non-error Id to its profile entry
-toReport :: Database -> IO ([ProfileEntry], IntMap Int)
+toReport :: Database -> IO ([ProfileEntry Key], IntMap Int)
 toReport db = do
     status <- prepareForDependencyOrder db
     let order = let shw i = maybe "<unknown>" (show . fst) $ Map.lookup i status
@@ -118,7 +130,7 @@ toReport db = do
                 in Map.fromList $ zip (sortBy (flip compare) xs) [0..]
 
         f (k, Result{..}) = ProfileEntry
-            {prfName = show k
+            {prfName = k
             ,prfBuilt = fromStep resultBuilt
             ,prfVisited = fromStep resultVisited
             ,prfChanged = fromStep resultChanged
@@ -134,7 +146,7 @@ alwaysRerunResult current = Result (Value $ toDyn "<alwaysRerun>") (Step 0) (Ste
 readDataFileHTML :: FilePath -> IO LBS.ByteString
 readDataFileHTML file = LBS.readFile =<< getDataFile ("html" </> file)
 
-generateHTML :: Maybe [Int] -> [ProfileEntry] -> IO LBS.ByteString
+generateHTML :: Maybe [Int] -> [ProfileEntry String] -> IO LBS.ByteString
 generateHTML dirtyKeys xs = do
     report <- readDataFileHTML "profile.html"
     let f "data/profile-data.js" = pure $ LBS.pack $ "var profile =\n" ++ generateJSONProfile xs
@@ -146,7 +158,7 @@ generateJSONBuild :: Maybe [Ids.Id] -> String
 generateJSONBuild (Just dirtyKeys) = jsonList [jsonList (map show dirtyKeys)]
 generateJSONBuild Nothing          = jsonList []
 
-generateJSONProfile :: [ProfileEntry] -> String
+generateJSONProfile :: [ProfileEntry String] -> String
 generateJSONProfile = jsonListLines . map showEntry
     where
         showEntry ProfileEntry{..} = jsonList $
