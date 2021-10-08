@@ -62,6 +62,11 @@ constraints:
     haskell-language-server -brittany -class -stylishhaskell -tactic
 
 allow-newer:
+    ekg:base,
+    ekg-core:base,
+    ekg-core:ghc-prim,
+    ekg-json:base,
+    snap-server:base,
     floskell:base,
     floskell:ghc-prim,
     -- for shake-bench

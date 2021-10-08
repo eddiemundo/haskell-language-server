@@ -30,8 +30,8 @@ import qualified Language.LSP.Types              as LSP
 
 import           Control.Monad
 import           Development.IDE.Core.Shake
-import           System.Environment             (lookupEnv)
-
+import           System.Environment              (lookupEnv)
+import           System.Metrics
 
 ------------------------------------------------------------
 -- Exposed API
@@ -46,8 +46,9 @@ initialise :: Config
            -> VFSHandle
            -> HieDb
            -> IndexQueue
+           -> Maybe Store
            -> IO IdeState
-initialise defaultConfig mainRule lspEnv logger debouncer options vfs hiedb hiedbChan = do
+initialise defaultConfig mainRule lspEnv logger debouncer options vfs hiedb hiedbChan metrics = do
     shakeProfiling <- do
         let fromConf = optShakeProfiling options
         fromEnv <- lookupEnv "GHCIDE_BUILD_PROFILING"
@@ -64,6 +65,7 @@ initialise defaultConfig mainRule lspEnv logger debouncer options vfs hiedb hied
         hiedbChan
         vfs
         (optShakeOptions options)
+        metrics
           $ do
             addIdeGlobal $ GlobalIdeOptions options
             ofInterestRules

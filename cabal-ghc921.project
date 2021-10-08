@@ -79,6 +79,11 @@ allow-newer:
   diagrams:diagrams-core,
   Chart-diagrams:diagrams-core,
   SVGFonts:diagrams-core
+  ekg:base,
+  ekg-core:base,
+  ekg-core:ghc-prim,
+  ekg-json:base,
+  snap-server:base,
 
 constraints:
   Agda ==2.6.1.3,

@@ -7,13 +7,15 @@ module Development.IDE.Main
 ,commandP
 ,defaultMain
 ,testing) where
+import           Control.Concurrent                    (killThread)
+import           Control.Concurrent.Async              (async, waitCatch)
 import           Control.Concurrent.Extra              (newLock, readVar,
                                                         withLock,
                                                         withNumCapabilities)
 import           Control.Exception.Safe                (Exception (displayException),
-                                                        catchAny)
-import           Control.Monad.Extra                   (concatMapM, unless,
-                                                        when)
+                                                        catchAny, onException)
+import           Control.Monad.Extra                   (concatMapM, join,
+                                                        unless, when)
 import qualified Data.Aeson.Encode.Pretty              as A
 import           Data.Default                          (Default (def))
 import           Data.Foldable                         (traverse_)
@@ -26,6 +28,7 @@ import qualified Data.Text                             as T
 import qualified Data.Text.IO                          as T
 import           Data.Text.Lazy.Encoding               (decodeUtf8)
 import qualified Data.Text.Lazy.IO                     as LT
+import           Data.Traversable                      (for)
 import           Development.IDE                       (Action, GhcVersion (..),
                                                         Rules, ghcVersion,
                                                         hDuplicateTo')
@@ -106,6 +109,9 @@ import           System.IO                             (BufferMode (LineBufferin
                                                         hSetBuffering,
                                                         hSetEncoding, stderr,
                                                         stdin, stdout, utf8)
+import qualified System.Metrics                        as Monitoring
+import           System.Remote.Monitoring
+import qualified System.Remote.Monitoring              as Monitoring
 import           System.Time.Extra                     (offsetTime,
                                                         showDuration)
 import           Text.Printf                           (printf)
@@ -172,6 +178,7 @@ data Arguments = Arguments
     , argsHandleIn              :: IO Handle
     , argsHandleOut             :: IO Handle
     , argsThreads               :: Maybe Natural
+    , argsMonitoringPort        :: Maybe Natural
     }
 
 instance Default Arguments where
@@ -204,6 +211,7 @@ instance Default Arguments where
                 -- the language server tests without the redirection.
                 putStr " " >> hFlush stdout
                 return newStdout
+        , argsMonitoringPort = Just 8000
         }
 
 testing :: Arguments
@@ -287,6 +295,24 @@ defaultMain Arguments{..} = do
                     hPutStrLn stderr $
                         "Currently, HLS supports GHC 9 only partially. "
                         <> "See [issue #297](https://github.com/haskell/haskell-language-server/issues/297) for more detail."
+
+                server <- fmap join $ for argsMonitoringPort $ \p -> do
+                    store <- Monitoring.newStore
+                    let startServer = Monitoring.forkServerWith store "localhost" (fromIntegral p)
+                    -- this can fail if the port is busy, throwing an async exception back to us
+                    -- to handle that, wrap the server thread in an async
+                    mb_server <- async startServer >>= waitCatch
+                    case mb_server of
+                        Right s -> do
+                            logInfo logger $ T.pack $
+                                "Started monitoring server on port " <> show p
+                            return $ Just s
+                        Left e -> do
+                            logInfo logger $ T.pack $
+                                "Unable to bind monitoring server on port "
+                                <> show p <> ":" <> show e
+                            return Nothing
+
                 initialise
                     argsDefaultHlsConfig
                     rules
@@ -297,6 +323,9 @@ defaultMain Arguments{..} = do
                     vfs
                     hiedb
                     hieChan
+                    (Monitoring.serverMetricStore <$> server)
+                    `onException`
+                        traverse_ (killThread . serverThreadId) server
         Check argFiles -> do
           dir <- IO.getCurrentDirectory
           dbLoc <- getHieDbLoc dir
@@ -329,7 +358,7 @@ defaultMain Arguments{..} = do
                         , optCheckProject = pure False
                         , optModifyDynFlags = optModifyDynFlags def_options <> pluginModifyDynflags plugins
                         }
-            ide <- initialise argsDefaultHlsConfig rules Nothing logger debouncer options vfs hiedb hieChan
+            ide <- initialise argsDefaultHlsConfig rules Nothing logger debouncer options vfs hiedb hieChan Nothing
             shakeSessionInit ide
             registerIdeConfiguration (shakeExtras ide) $ IdeConfiguration mempty (hashed Nothing)
 
@@ -380,7 +409,7 @@ defaultMain Arguments{..} = do
                     , optCheckProject = pure False
                     , optModifyDynFlags = optModifyDynFlags def_options <> pluginModifyDynflags plugins
                     }
-            ide <- initialise argsDefaultHlsConfig rules Nothing logger debouncer options vfs hiedb hieChan
+            ide <- initialise argsDefaultHlsConfig rules Nothing logger debouncer options vfs hiedb hieChan Nothing
             shakeSessionInit ide
             registerIdeConfiguration (shakeExtras ide) $ IdeConfiguration mempty (hashed Nothing)
             c ide

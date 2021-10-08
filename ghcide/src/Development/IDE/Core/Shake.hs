@@ -109,11 +109,12 @@ import           Development.IDE.Core.PositionMapping
 import           Development.IDE.Core.ProgressReporting
 import           Development.IDE.Core.RuleTypes
 import           Development.IDE.Core.Tracing
-import           Development.IDE.GHC.Compat             (NameCacheUpdater (..),
-                                                         upNameCache, NameCache,
+import           Development.IDE.GHC.Compat             (NameCache,
+                                                         NameCacheUpdater (..),
                                                          initNameCache,
+                                                         knownKeyNames,
                                                          mkSplitUniqSupply,
-                                                         knownKeyNames)
+                                                         upNameCache)
 import           Development.IDE.GHC.Orphans            ()
 import           Development.IDE.Graph                  hiding (ShakeValue)
 import qualified Development.IDE.Graph                  as Shake
@@ -145,17 +146,21 @@ import           OpenTelemetry.Eventlog
 import           Control.Exception.Extra                hiding (bracket_)
 import qualified Data.ByteString.Char8                  as BS8
 import           Data.Default
-import           Data.Foldable                          (toList)
+import           Data.Foldable                          (for_, toList)
 import           Data.HashSet                           (HashSet)
 import qualified Data.HashSet                           as HSet
 import           Data.IORef.Extra                       (atomicModifyIORef'_,
                                                          atomicModifyIORef_)
 import           Data.Text                              (pack)
+import           Development.IDE.Graph.Internal.Types   (Step (Step),
+                                                         databaseStep)
 import qualified Development.IDE.Types.Exports          as ExportsMap
 import           HieDb.Types
 import           Ide.Plugin.Config
 import qualified Ide.PluginUtils                        as HLS
 import           Ide.Types                              (PluginId)
+import           System.Metrics                         (Store, registerCounter,
+                                                         registerGauge)
 
 -- | We need to serialize writes to the database, so we send any function that
 -- needs to write to the database over the channel, where it will be picked up by
@@ -319,7 +324,7 @@ lastValueIO s@ShakeExtras{positionMapping,persistentKeys,state} k file = do
           | otherwise = do
           pmap <- readVar persistentKeys
           mv <- runMaybeT $ do
-            liftIO $ Logger.logDebug (logger s) $ T.pack $ "LOOKUP UP PERSISTENT FOR: " ++ show k
+            liftIO $ Logger.logDebug (logger s) $ T.pack $ "LOOKUP PERSISTENT FOR: " ++ show k
             f <- MaybeT $ pure $ HMap.lookup (Key k) pmap
             (dv,del,ver) <- MaybeT $ runIdeAction "lastValueIO" s $ f file
             MaybeT $ pure $ (,del,ver) <$> fromDynamic dv
@@ -486,10 +491,11 @@ shakeOpen :: Maybe (LSP.LanguageContextEnv Config)
           -> IndexQueue
           -> VFSHandle
           -> ShakeOptions
+          -> Maybe Store
           -> Rules ()
           -> IO IdeState
 shakeOpen lspEnv defaultConfig logger debouncer
-  shakeProfileDir (IdeReportProgress reportProgress) ideTesting@(IdeTesting testing) hiedb indexQueue vfs opts rules = mdo
+  shakeProfileDir (IdeReportProgress reportProgress) ideTesting@(IdeTesting testing) hiedb indexQueue vfs opts metrics rules = mdo
 
     us <- mkSplitUniqSupply 'r'
     ideNc <- newIORef (initNameCache us knownKeyNames)
@@ -539,7 +545,23 @@ shakeOpen lspEnv defaultConfig logger debouncer
         { optOTMemoryProfiling = IdeOTMemoryProfiling otProfilingEnabled
         , optProgressStyle
         } <- getIdeOptionsIO shakeExtras
+
     startTelemetry otProfilingEnabled logger $ state shakeExtras
+
+    for_ metrics $ \store -> do
+        let readValuesCounter = fromIntegral . HMap.size <$> readVar (state shakeExtras)
+            readDirtyKeys = fromIntegral . Prelude.length <$> readIORef (dirtyKeys shakeExtras)
+            readIndexPending = fromIntegral . HMap.size <$> readTVarIO (indexPending $ hiedbWriter shakeExtras)
+            readExportsMap = fromIntegral . HMap.size . getExportsMap <$> readVar (exportsMap shakeExtras)
+            readDatabaseCount = fromIntegral . Prelude.length <$> shakeGetDatabaseKeys shakeDb
+            readDatabaseStep = (\(Step s) -> fromIntegral s) <$> readIORef (databaseStep $ shakeDatabaseDatabase shakeDb)
+
+        registerGauge "ghcide.values_count" readValuesCounter store
+        registerGauge "ghcide.dirty_keys_count" readDirtyKeys store
+        registerGauge "ghcide.indexing_pending_count" readIndexPending store
+        registerCounter "ghcide.exports_map_count" readExportsMap store
+        registerCounter "ghcide.database_count" readDatabaseCount store
+        registerCounter "ghcide.build_count" readDatabaseStep store
 
     return ideState
 
