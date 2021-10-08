@@ -8,19 +8,26 @@ module Development.IDE.Graph.Database(
     shakeRunDatabase,
     shakeRunDatabaseForKeys,
     shakeProfileDatabase,
+    shakeDatabaseDatabase
+    ,shakeGetDatabaseKeys
     ) where
 
 import           Data.Dynamic
 import           Data.Maybe
-import           Development.IDE.Graph.Classes ()
+import           Development.IDE.Graph.Classes           ()
 import           Development.IDE.Graph.Internal.Action
 import           Development.IDE.Graph.Internal.Database
+import qualified Development.IDE.Graph.Internal.Ids      as Ids
 import           Development.IDE.Graph.Internal.Options
 import           Development.IDE.Graph.Internal.Profile  (writeProfile)
 import           Development.IDE.Graph.Internal.Rules
 import           Development.IDE.Graph.Internal.Types
 
-data ShakeDatabase = ShakeDatabase !Int [Action ()] Database
+data ShakeDatabase = ShakeDatabase
+    { _shakeDatabaseCounter :: !Int
+    , _shakeDatabaseActions :: [Action ()]
+    , shakeDatabaseDatabase :: Database
+    }
 
 -- Placeholder to be the 'extra' if the user doesn't set it
 data NonExportedType = NonExportedType
@@ -37,6 +44,9 @@ shakeNewDatabase opts rules = do
 
 shakeRunDatabase :: ShakeDatabase -> [Action a] -> IO ([a], [IO ()])
 shakeRunDatabase = shakeRunDatabaseForKeys Nothing
+
+shakeGetDatabaseKeys :: ShakeDatabase -> IO [Key]
+shakeGetDatabaseKeys (ShakeDatabase _ _ db) = map fst <$> Ids.elems (databaseValues db)
 
 -- Only valid if we never pull on the results, which we don't
 unvoid :: Functor m => m () -> m a
