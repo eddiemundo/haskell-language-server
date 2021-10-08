@@ -356,8 +356,9 @@ defaultMain Arguments{..} = do
                         nub $
                             Key GhcSession :
                             Key GhcSessionDeps :
-                            [k | (_, k) <- HashMap.keys values, k /= Key GhcSessionIO]
-                            ++ [Key GhcSessionIO]
+                            -- TODO restore
+                            -- [fromKey k | k <- HashMap.keys values, k /= Key GhcSessionIO] ++
+                            [Key GhcSessionIO]
                 measureMemory logger [keys] consoleObserver valuesRef
 
             unless (null failed) (exitWith $ ExitFailure (length failed))

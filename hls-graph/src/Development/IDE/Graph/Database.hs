@@ -8,7 +8,8 @@ module Development.IDE.Graph.Database(
     shakeRunDatabase,
     shakeRunDatabaseForKeys,
     shakeProfileDatabase,
-    shakeLastBuildKeys) where
+    shakeGetDirtySet
+    ) where
 
 import           Data.Dynamic
 import           Data.Maybe
@@ -42,6 +43,9 @@ shakeRunDatabase = shakeRunDatabaseForKeys Nothing
 shakeLastBuildKeys :: ShakeDatabase -> IO [Key]
 shakeLastBuildKeys (ShakeDatabase _ _ db) = getLastBuildKeys db
 
+-- | Returns the set of dirty keys annotated with their age (in # of builds)
+shakeGetDirtySet :: ShakeDatabase -> IO (Maybe [(Key, Int)])
+shakeGetDirtySet (ShakeDatabase _ _ db) = Development.IDE.Graph.Internal.Database.getDirtySet db
 
 -- Only valid if we never pull on the results, which we don't
 unvoid :: Functor m => m () -> m a

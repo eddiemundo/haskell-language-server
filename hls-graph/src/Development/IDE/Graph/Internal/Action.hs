@@ -1,7 +1,7 @@
+{-# LANGUAGE ConstraintKinds            #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TypeFamilies               #-}
-{-# LANGUAGE ConstraintKinds #-}
 
 module Development.IDE.Graph.Internal.Action
 ( ShakeValue
@@ -15,6 +15,7 @@ module Development.IDE.Graph.Internal.Action
 , parallel
 , reschedule
 , runActions
+, Development.IDE.Graph.Internal.Action.getDirtySet
 ) where
 
 import           Control.Concurrent.Async
@@ -26,9 +27,9 @@ import           Control.Monad.Trans.Reader
 import           Data.IORef
 import           Development.IDE.Graph.Classes
 import           Development.IDE.Graph.Internal.Database
+import           Development.IDE.Graph.Internal.Rules    (RuleResult)
 import           Development.IDE.Graph.Internal.Types
 import           System.Exit
-import Development.IDE.Graph.Internal.Rules (RuleResult)
 
 type ShakeValue a = (Show a, Typeable a, Eq a, Hashable a, NFData a)
 
@@ -125,3 +126,9 @@ runActions :: Database -> [Action a] -> IO [a]
 runActions db xs = do
     deps <- newIORef Nothing
     runReaderT (fromAction $ parallel xs) $ SAction db deps
+
+-- | Returns the set of dirty keys annotated with their age (in # of builds)
+getDirtySet  :: Action (Maybe [(Key, Int)])
+getDirtySet = do
+    db <- getDatabase
+    liftIO $ Development.IDE.Graph.Internal.Database.getDirtySet db

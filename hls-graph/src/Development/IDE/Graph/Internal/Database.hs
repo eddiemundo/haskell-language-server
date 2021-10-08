@@ -11,12 +11,13 @@
 {-# LANGUAGE TupleSections              #-}
 {-# LANGUAGE TypeFamilies               #-}
 
-module Development.IDE.Graph.Internal.Database (newDatabase, incDatabase, build) where
+module Development.IDE.Graph.Internal.Database (newDatabase, incDatabase, build,getDirtySet) where
 
 import           Control.Concurrent.Async
 import           Control.Concurrent.Extra
 import           Control.Exception
 import           Control.Monad
+import           Control.Monad.Extra                   (mapMaybeM)
 import           Control.Monad.IO.Class                (MonadIO (liftIO))
 import           Control.Monad.Trans.Class             (lift)
 import           Control.Monad.Trans.Reader
@@ -30,6 +31,7 @@ import qualified Data.IntSet                           as Set
 import           Data.Maybe
 import           Data.Tuple.Extra
 import           Development.IDE.Graph.Classes
+import qualified Development.IDE.Graph.Internal.Ids    as Id
 import qualified Development.IDE.Graph.Internal.Ids    as Ids
 import           Development.IDE.Graph.Internal.Intern
 import qualified Development.IDE.Graph.Internal.Intern as Intern
@@ -182,6 +184,16 @@ compute db@Database{..} key id mode result = do
         Ids.insert databaseValues id (key, Clean res)
     pure res
 
+-- | Returns the set of dirty keys annotated with their age (in # of builds)
+getDirtySet :: Database -> IO (Maybe [(Key, Int)])
+getDirtySet db = do
+    dirtySet <- readIORef (databaseDirtySet db)
+    Step curr <- readIORef (databaseStep db)
+    let idToKey = fmap (secondM calcAgeStatus =<<)
+                . Id.lookup (databaseValues db)
+        calcAge Result{resultBuilt = Step x} = curr - x
+        calcAgeStatus = fmap calcAge . getResult
+    mapMaybeM idToKey `traverse` (Set.toList <$> dirtySet)
 --------------------------------------------------------------------------------
 -- Lazy IO trick
 

@@ -10,6 +10,7 @@ module Development.IDE.Graph.Internal.Types where
 import           Control.Applicative
 import           Control.Concurrent.Extra
 import           Control.Monad.Catch
+-- Needed in GHC 8.6.5
 import           Control.Monad.Fail
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Reader
@@ -57,6 +58,8 @@ data SAction = SAction {
     actionDeps     :: !(IORef (Maybe [Id])) -- Nothing means always rerun
     }
 
+getDatabase :: Action Database
+getDatabase = Action $ asks actionDatabase
 
 ---------------------------------------------------------------------
 -- DATABASE
