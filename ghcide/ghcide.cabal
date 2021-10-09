@@ -48,7 +48,7 @@ library
         dependent-map,
         dependent-sum,
         dlist,
-        ekg,
+        ekg-wai,
         ekg-core,
         exceptions,
         -- we can't use >= 1.7.10 while we have to use hlint == 3.2.*

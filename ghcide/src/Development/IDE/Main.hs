@@ -110,8 +110,8 @@ import           System.IO                             (BufferMode (LineBufferin
                                                         hSetEncoding, stderr,
                                                         stdin, stdout, utf8)
 import qualified System.Metrics                        as Monitoring
-import           System.Remote.Monitoring
-import qualified System.Remote.Monitoring              as Monitoring
+import           System.Remote.Monitoring.Wai
+import qualified System.Remote.Monitoring.Wai          as Monitoring
 import           System.Time.Extra                     (offsetTime,
                                                         showDuration)
 import           Text.Printf                           (printf)
