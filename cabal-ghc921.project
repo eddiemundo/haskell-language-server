@@ -49,6 +49,12 @@ source-repository-package
   tag: 224f3901eaa1b32a27e097968afd4a3894efa77e
   -- https://github.com/pepeiborra/ghc-check/pull/14/files
 
+source-repository-package
+  type:git
+  location: https://github.com/tvh/ekg-wai/
+  tag: ba56333e0959f896a03f15a9f151f4a31d1bfcca
+  -- https://github.com/tvh/ekg-wai/issues/4
+
 write-ghc-environment-files: never
 
 index-state: 2021-09-29T21:38:47Z
@@ -78,12 +84,12 @@ allow-newer:
   dependent-sum:constraints,
   diagrams:diagrams-core,
   Chart-diagrams:diagrams-core,
-  SVGFonts:diagrams-core
+  SVGFonts:diagrams-core,
   ekg:base,
   ekg-core:base,
   ekg-core:ghc-prim,
   ekg-json:base,
-  snap-server:base,
+  ekg-wai:base -- https://github.com/tvh/ekg-wai/issues/6
 
 constraints:
   Agda ==2.6.1.3,
