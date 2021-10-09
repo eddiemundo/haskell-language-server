@@ -68,11 +68,13 @@ constraints:
     haskell-language-server -brittany -class -stylishhaskell -tactic
 
 allow-newer:
-    ekg:base, -- https://github.com/tibbe/ekg/issues/85
+    -- https://github.com/tibbe/ekg/issues/85
+    ekg:base,
     ekg-core:base,
     ekg-core:ghc-prim,
     ekg-json:base,
-    ekg-wai:base, -- https://github.com/tvh/ekg-wai/issues/6
+    -- https://github.com/tvh/ekg-wai/issues/6
+    ekg-wai:base,
     snap-server:base,
     floskell:base,
     floskell:ghc-prim,

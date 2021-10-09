@@ -89,7 +89,7 @@ allow-newer:
   ekg-core:base,
   ekg-core:ghc-prim,
   ekg-json:base,
-  ekg-wai:base -- https://github.com/tvh/ekg-wai/issues/6
+  ekg-wai:base
 
 constraints:
   Agda ==2.6.1.3,
