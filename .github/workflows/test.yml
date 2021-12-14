@@ -74,63 +74,77 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
-        with:
-          submodules: true
+
       - uses: haskell/actions/setup@v1
+        id: HaskEnvSetup
         with:
           ghc-version  : ${{ matrix.ghc   }}
           cabal-version: ${{ matrix.cabal }}
+          enable-stack: false
 
-      - run: ./fmt.sh
-        name: "HLint via ./fmt.sh"
-
-      - if: matrix.os == 'windows-latest'
-        name: Set some window specific things
+      - if: runner.os == 'Windows'
+        name: (Windows) Platform config
         run: |
-          echo "CABAL_STORE_DIR=$SYSTEMDRIVE\\SR" >> $GITHUB_ENV
           echo "CABAL_PKGS_DIR=~\\AppData\\cabal\\packages" >> $GITHUB_ENV
-
-      - if: matrix.os != 'windows-latest'
-        name: Set some linux/macOS specific things
+      - if: ( runner.os == 'Linux' ) || ( runner.os == 'macOS' )
+        name: (Linux,macOS) Platform config
         run: |
-          echo "CABAL_STORE_DIR=~/.cabal/store" >> $GITHUB_ENV
           echo "CABAL_PKGS_DIR=~/.cabal/packages" >> $GITHUB_ENV
 
       # Needs to be before Cache Cabal so the cache can detect changes to the modified cabal.project file
       - if: matrix.ghc == '9.0.1'
-        name: Use modified cabal.project for ghc9
-        run: cp cabal-ghc901.project cabal.project
-
-      - if: matrix.ghc == '8.8.4' && matrix.os == 'windows-latest'
-        name: Modify cabal.project to workaround segfaults for ghc-8.8.4 and windows
+        name: (GHC 9.0.1) Use modified `cabal.project`
+        run: |
+          cp cabal-ghc901.project cabal.project
+      - if: runner.os == 'Windows' && matrix.ghc == '8.8.4'
+        name: (Windows,GHC 8.8) Modify `cabal.project` to workaround segfaults
         run: |
           echo "package floskell" >> cabal.project
           echo "  ghc-options: -O0" >> cabal.project
 
-      - name: Cache Cabal
-        uses: actions/cache@v2
-        env:
-          cache-name: cache-cabal
-        with:
-          path: |
-            ${{ env.CABAL_PKGS_DIR }}
-            ${{ env.CABAL_STORE_DIR }}
-          key: v2-${{ runner.os }}-${{ matrix.ghc }}-build-${{ hashFiles('cabal.project') }}
-          restore-keys: |
-            v2-${{ runner.os }}-${{ matrix.ghc }}-bench-${{ hashFiles('cabal.project') }}
-            v2-${{ runner.os }}-${{ matrix.ghc }}-build-
-            v2-${{ runner.os }}-${{ matrix.ghc }}
-
-      - run: cabal update
-
-      # Need this to work around filepath length limits in Windows
-      - name: Shorten binary names
+      # All workflows which distinquishes cache on `cabal.project` needs this.
+      - name: Workaround shorten binary names
         run: |
           sed -i.bak -e 's/haskell-language-server/hls/g' \
                      -e 's/haskell_language_server/hls/g' \
                      haskell-language-server.cabal cabal.project
           sed -i.bak -e 's/Paths_haskell_language_server/Paths_hls/g' \
                      src/**/*.hs exe/*.hs
+
+      - name: Retrieving `cabal.project` Hackage timestamp
+        run: |
+          # Form: index-state: 2021-11-29T08:11:08Z
+          INDEX_STATE_ENTRY=$(grep index-state cabal.project)
+          # Form: 2021-11-29T08-11-08Z
+          INDEX_STATE1=$(echo "$INDEX_STATE_ENTRY" | cut -d' ' -f2 | tr ':' '-')
+          echo "INDEX_STATE=$INDEX_STATE1" >> $GITHUB_ENV
+
+      - name: Hackage sources cache
+        uses: actions/cache@v2
+        env:
+          cache-name: hackage-sources
+        with:
+          path: ${{ env.CABAL_PKGS_DIR }}
+          key:          ${{ env.cache-name }}-${{ env.INDEX_STATE }}
+          restore-keys: ${{ env.cache-name }}-
+
+      - name: Compiled deps cache
+        uses: actions/cache@v2
+        env:
+          cache-name: compiled-deps
+        with:
+          path: ${{ steps.HaskEnvSetup.outputs.cabal-store }}
+          key:  ${{ env.cache-name }}-${{ runner.os }}-${{ matrix.ghc }}-${{ env.INDEX_STATE }}-${{ hashFiles('cabal.project') }}
+          restore-keys: |
+                ${{ env.cache-name }}-${{ runner.os }}-${{ matrix.ghc }}-${{ env.INDEX_STATE }}-
+                ${{ env.cache-name }}-${{ runner.os }}-${{ matrix.ghc }}-
+                ${{ env.cache-name }}-${{ runner.os }}-
+
+      - run: cabal update
+
+      - name: "HLint via ./fmt.sh"
+        run: |
+          ./fmt.sh
 
       # repeating builds to workaround segfaults in windows and ghc-8.8.4
       - name: Build
@@ -178,7 +192,7 @@ jobs:
         name: Test hls-brittany-plugin
         run: cabal test hls-brittany-plugin --test-options="$TEST_OPTS" || cabal test hls-brittany-plugin --test-options="$TEST_OPTS" || LSP_TEST_LOG_COLOR=0 LSP_TEST_LOG_MESSAGES=true LSP_TEST_LOG_STDERR=true cabal test hls-brittany-plugin --test-options="$TEST_OPTS"
 
-      - if: matrix.test && matrix.ghc != '9.0.1'
+      - if: matrix.test
         name: Test hls-class-plugin
         run: cabal test hls-class-plugin --test-options="$TEST_OPTS" || cabal test hls-class-plugin --test-options="$TEST_OPTS" || LSP_TEST_LOG_COLOR=0 LSP_TEST_LOG_MESSAGES=true LSP_TEST_LOG_STDERR=true cabal test hls-class-plugin --test-options="$TEST_OPTS"
 

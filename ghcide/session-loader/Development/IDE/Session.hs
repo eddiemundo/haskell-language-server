@@ -73,11 +73,12 @@ import           System.IO
 import           System.Info
 
 import           Control.Applicative                  (Alternative ((<|>)))
-import           Control.Exception                    (evaluate)
 import           Data.Void
 
-import           Control.Concurrent.STM               (atomically)
+import           Control.Concurrent.STM.Stats         (atomically, modifyTVar',
+                                                       readTVar, writeTVar)
 import           Control.Concurrent.STM.TQueue
+import           Data.Foldable                        (for_)
 import qualified Data.HashSet                         as Set
 import           Database.SQLite.Simple
 import           Development.IDE.Core.Tracing         (withTrace)
@@ -245,9 +246,10 @@ loadSessionWithOptions SessionLoadingOptions{..} dir = do
   return $ do
     extras@ShakeExtras{logger, restartShakeSession, ideNc, knownTargetsVar, lspEnv
                       } <- getShakeExtras
-    let invalidateShakeCache = do
+    let invalidateShakeCache :: IO ()
+        invalidateShakeCache = do
             void $ modifyVar' version succ
-            atomically $ recordDirtyKeys extras GhcSessionIO [emptyFilePath]
+            join $ atomically $ recordDirtyKeys extras GhcSessionIO [emptyFilePath]
 
     IdeOptions{ optTesting = IdeTesting optTesting
               , optCheckProject = getCheckProject
@@ -264,13 +266,17 @@ loadSessionWithOptions SessionLoadingOptions{..} dir = do
               TargetModule _ -> do
                 found <- filterM (IO.doesFileExist . fromNormalizedFilePath) targetLocations
                 return (targetTarget, found)
-          atomically $ recordDirtyKeys extras GetKnownTargets  [emptyFilePath]
-          modifyVarIO' knownTargetsVar $ traverseHashed $ \known -> do
-            let known' = HM.unionWith (<>) known $ HM.fromList $ map (second Set.fromList) knownTargets
-            when (known /= known') $
+          hasUpdate <- join $ atomically $ do
+            known <- readTVar knownTargetsVar
+            let known' = flip mapHashed known $ \k ->
+                            HM.unionWith (<>) k $ HM.fromList $ map (second Set.fromList) knownTargets
+                hasUpdate = if known /= known' then Just (unhashed known') else Nothing
+            writeTVar knownTargetsVar known'
+            logDirtyKeys <- recordDirtyKeys extras GetKnownTargets [emptyFilePath]
+            return (logDirtyKeys >> pure hasUpdate)
+          for_ hasUpdate $ \x ->
                 logDebug logger $ "Known files updated: " <>
-                    T.pack(show $ (HM.map . Set.map) fromNormalizedFilePath known')
-            pure known'
+                    T.pack(show $ (HM.map . Set.map) fromNormalizedFilePath x)
 
     -- Create a new HscEnv from a hieYaml root and a set of options
     -- If the hieYaml file already has an HscEnv, the new component is
@@ -404,7 +410,7 @@ loadSessionWithOptions SessionLoadingOptions{..} dir = do
                     -- update exports map
                     extras <- getShakeExtras
                     let !exportsMap' = createExportsMap $ mapMaybe (fmap hirModIface) modIfaces
-                    liftIO $ modifyVar_ (exportsMap extras) $ evaluate . (exportsMap' <>)
+                    liftIO $ atomically $ modifyTVar' (exportsMap extras) (exportsMap' <>)
 
           return (second Map.keys res)
 
