@@ -27,6 +27,7 @@ concurrency:
   cancel-in-progress: true
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - master
@@ -44,7 +45,7 @@ on:
     - cron: "25 2/8 * * *"
 
 env:
-  cabalBuild: "v2-build all --enable-tests --enable-benchmarks"
+  cabalBuild: "v2-build all --enable-tests --enable-benchmarks --keep-going"
 
 jobs:
 
@@ -52,19 +53,21 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       should_skip: ${{ steps.skip_check.outputs.should_skip }}
-      should_skip_ghcide: ${{ steps.skip_ghcide_check.outputs.should_skip }}
     steps:
       - id: skip_check
         uses: fkirc/skip-duplicate-actions@v3.4.1
         with:
           cancel_others: false
-          paths_ignore: '["**/docs/**", "**.md", "**/LICENSE", "install/**", "**.nix", "flake.lock", "**/README.md", "FUNDING.yml", ".circleci/**"]'
-      # If we only change ghcide downstream packages we have not test ghcide itself
-      - id: skip_ghcide_check
-        uses: fkirc/skip-duplicate-actions@v3.4.1
-        with:
-          cancel_others: false
-          paths_ignore: '["hls-test-utils/**", "plugins/**", "src/**", "exe/**", "test/**", "shake-bench/**"]'
+          paths_ignore: '["**/docs/**"
+                         , "**.md"
+                         , "**/LICENSE"
+                         , "install/**"
+                         , "**.nix"
+                         , "flake.lock"
+                         , "**/README.md"
+                         , "FUNDING.yml"
+                         , ".circleci/**"
+                         ]'
 
   caching:
     if: needs.pre_job.outputs.should_skip != 'true'
@@ -73,8 +76,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ghc: ["9.0.1", '8.10.7', '8.10.6', "8.8.4", "8.6.5"]
-        os: [ubuntu-latest, macOS-latest, windows-latest]
+        ghc: [ "9.0.1"
+             , "8.10.7"
+             , "8.10.6"
+             , "8.8.4"
+             , "8.6.5"
+             ]
+        os: [ "ubuntu-latest"
+            , "macOS-latest"
+            , "windows-latest"
+            ]
         cabal: ['3.6']
 
     steps:
@@ -100,7 +111,11 @@ jobs:
       - if: matrix.ghc == '9.0.1'
         name: (GHC 9.0.1) Use modified `cabal.project`
         run: |
-          cp cabal-ghc901.project cabal.project
+          # File has some protections preventing regular `rm`.
+          # (most probably sticky bit is set on $HOME)
+          # `&&` insures `rm -f` return is positive.
+          # Many platforms also have `alias cp='cp -i'`.
+          rm -f -v cabal.project && cp -v cabal-ghc901.project cabal.project
       - if: runner.os == 'Windows' && matrix.ghc == '8.8.4'
         name: (Windows,GHC 8.8) Modify `cabal.project` to workaround segfaults
         run: |
@@ -127,6 +142,15 @@ jobs:
           INDEX_STATE1=$(echo "$INDEX_STATE_ENTRY" | cut -d' ' -f2 | tr ':' '-')
           echo "INDEX_STATE=$INDEX_STATE1" >> $GITHUB_ENV
 
+      - name: Form the package list ('cabal.project.freeze')
+        continue-on-error: true
+        run: |
+          cabal v2-freeze
+          echo ''
+          echo 'Output:'
+          echo ''
+          cat 'cabal.project.freeze'
+
       # 2021-12-02: NOTE: Cabal Hackage source tree storage does not depend on OS or GHC really,
       # but can depend on `base`.
       # But this caching is happens only inside `master` for `master` purposes of compiling the deps
@@ -137,9 +161,11 @@ jobs:
         env:
           cache-name: hackage-sources
         with:
-          path: ${{ env.CABAL_PKGS_DIR }}
-          key:          ${{ env.cache-name }}-${{ env.INDEX_STATE }}
-          restore-keys: ${{ env.cache-name }}-
+          path:  ${{ env.CABAL_PKGS_DIR }}
+          key:   ${{ env.cache-name }}-${{ env.INDEX_STATE }}-${{ hashFiles('cabal.project.freeze') }}
+          restore-keys: |
+                 ${{ env.cache-name }}-${{ env.INDEX_STATE }}-
+                 ${{ env.cache-name }}-
 
       - name: Compiled deps cache
         id: compiled-deps
@@ -148,17 +174,17 @@ jobs:
           cache-name: compiled-deps
         with:
           path: ${{ steps.HaskEnvSetup.outputs.cabal-store }}
-          key:  ${{ env.cache-name }}-${{ runner.os }}-${{ matrix.ghc }}-${{ env.INDEX_STATE }}-${{ hashFiles('cabal.project') }}
+          key:  ${{ env.cache-name }}-${{ runner.os }}-${{ matrix.ghc }}-${{ env.INDEX_STATE }}-${{ hashFiles('cabal.project.freeze') }}
           restore-keys: |
                 ${{ env.cache-name }}-${{ runner.os }}-${{ matrix.ghc }}-${{ env.INDEX_STATE }}-
                 ${{ env.cache-name }}-${{ runner.os }}-${{ matrix.ghc }}-
                 ${{ env.cache-name }}-${{ runner.os }}-
 
-      - if: (! steps.compiled-deps.outputs.cache-hit)
+      - if: steps.compiled-deps.outputs.cache-hit != 'true'
         run: |
           cabal update
 
-      - if: (! steps.compiled-deps.outputs.cache-hit)
+      - if: steps.compiled-deps.outputs.cache-hit != 'true'
         name: Download all sources
         run: |
           cabal $cabalBuild --only-download
@@ -168,8 +194,13 @@ jobs:
       # but to cache what can be cached, so step is fault tolerant & would always succseed.
       # 2021-12-11: NOTE: Building all targets, since
       # current Cabal does not allow `all --enable-tests --enable-benchmarks --only-dependencies`
-      - if: (! steps.compiled-deps.outputs.cache-hit)
+      - if: steps.compiled-deps.outputs.cache-hit != 'true'
         name: Build all targets; try 3 times
         continue-on-error: true
         run: |
           cabal $cabalBuild || cabal $cabalBuild || cabal $cabalBuild
+
+      # Despite the `continue-on-error: true` directive - CI does not ignore the return code of the last step
+      - name: Workaround to CI platform
+        run: |
+          true
