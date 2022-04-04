@@ -157,7 +157,7 @@ jobs:
       # so having a shared pool here that depends only on Hackage pin & does not depend on `base` is "good enough"
       # & used such because it preserves 10% of a global cache storage pool.
       - name: Hackage sources cache
-        uses: actions/cache@v2
+        uses: actions/cache@v3.0.1
         env:
           cache-name: hackage-sources
         with:
@@ -169,7 +169,7 @@ jobs:
 
       - name: Compiled deps cache
         id: compiled-deps
-        uses: actions/cache@v2
+        uses: actions/cache@v3.0.1
         env:
           cache-name: compiled-deps
         with:
