@@ -73,7 +73,7 @@ jobs:
           echo "INDEX_STATE=$INDEX_STATE1" >> $GITHUB_ENV
 
       - name: Hackage sources cache
-        uses: actions/cache@v2
+        uses: actions/cache@v3.0.11
         env:
           cache-name: hackage-sources
         with:
@@ -82,7 +82,7 @@ jobs:
           restore-keys: ${{ env.cache-name }}-
 
       - name: Compiled deps cache
-        uses: actions/cache@v2
+        uses: actions/cache@v3.0.11
         env:
           cache-name: compiled-deps
         with:
